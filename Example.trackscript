@@ -1,0 +1,326 @@
+// General info
+// <§1/1,#600,~2,%100,ƒ1,¶0>&<§2/4,#600,~5,%100,ƒ1,¶0>
+// <§position,#pitch,~length,%volume,ƒsourceID,¶panning,&slideNoteConnector<note>
+//
+// § is the note's position inside its measure. The format is §beat/subdivision:
+//
+//     beat        1-based, counts from the start of the line's measure.
+//                 Must not exceed the beats per measure of the block's
+//                 signature (so §5/1 is invalid in 4/4).
+//     subdivision 1-based, counts from the start of that beat.
+//                 The number of subdivisions per beat is implied by the
+//                 meter and the smallest unit used in the block; §1/1 is
+//                 the start of beat 1, and §1/4 is the last of four
+//                 subdivisions in that beat.
+//
+// Fractions are allowed in the subdivision: §1/2.5 is a point halfway
+// between subdivisions 2 and 3 of beat 1.
+//
+// Each line of a block is one measure. Every § on that line counts from
+// the start of that measure, so §1/1 on line 3 means "the start of the
+// third measure", not "the start of the block". A beat number higher
+// than the beats per measure is invalid — it does not spill onto the
+// next line, because the line itself decides when the next measure
+// begins. §9/1 is therefore invalid in a 4/4 block.
+//
+// The same beat/subdivision shape is used for intervals inside
+// operators (see the Operators section). There, the beat number may be
+// 0 because an interval is a distance, not a position:
+//
+//     →0/1    every 1 subdivision
+//     →1/2    every 1 beat and 2 subdivisions
+//     →2/0    every 2 beats
+//
+// ~length is in beats. A note can outlive the measure it is written in, so a long
+//   note's tail can continue while later measures from the BlockList play.
+// ƒ sound sources are function-like:
+//     ƒ1()                 a sound source by ID (a sample today; soundfonts are planned, since the
+//                          conversion work comes first)
+//     ƒ'samples/KICK.wav'() a sound source by path
+//     ƒ'samples/KICK.wav'(5) same source, starting 5 sample frames into the file
+//     ƒKick                a pattern call in the BlockList
+//     ƒ'samples/X.wav'():  the default sound source for a pattern definition
+// The optional source argument currently accepts an integer sample-frame offset. An empty
+// argument list means offset 0. This gives source-specific controls one compact home; future
+// source operators can use the same call form without adding note-level property symbols.
+// ¶ is panning from -1 (left) to 1 (right), decimals allowed.
+// Pitch can be a frequency in Hz or a note name. C5 = 523.25 Hz.
+
+// Stuff like hz can be overridden with note names if you like.
+
+// The first note in a block has no defaults, so it must specify everything except what its
+//   pattern definition supplies (the sound source).
+// If a note leaves a property out, it takes that property from the previous note.
+// Inheritance is confined to one pattern. Nothing carries across patterns or the arrangement.
+// If a value has no symbol, assign it to the first property in the generic property order that has not yet been specified for that note. This is independent of the value's position within the note.
+// The generic property order is the order shown in the legend above.
+// A symbol-less value is a fallback for hand-written files.
+// UNDECIDED: whether the parser warns on one, and whether a strict mode refuses it.
+
+// Notes are cut by default when their length ends.
+
+// "=" can be placed between notes to delay the previous note's cut until the next note plays.
+// "▲" can be placed between notes to filter-cut the previous note when it ends.
+// "♪" can be placed between notes to release the previous note's envelope when it ends.
+// "&" can be placed between notes to make them a slide note, adding a part between them that blends the two together.
+// "▲" and "♪" do nothing on a note that has no instrument attached.
+
+// These can be combined. "=" changes when the ending effect happens, while "▲" and "♪" change what happens.
+// For example, "=♪" releases the previous note's envelope when the next note plays.
+// If there's no note after it, it attaches to the next note it finds, if it finds nothing then do nothing.
+
+// ─── Connector spacing ────────────────────────────────────────────
+//
+// Where a connector touches decides what it attaches to:
+//
+//     >@ <    glued to the note on its left: connects the previous note to the next note.
+//             The space on its right lets it find that next note across rests and measures.
+//     > @<    space on its left: standalone, not tied to the previous note.
+//
+// The same rule applies to & = ▲ ♪ and to shims.
+//
+// UNDECIDED:
+//   - the other two spacing cases: >@< (glued both sides) and > @ < (space both sides)
+//   - whether a newline counts as a space (the cross-measure case needs it to)
+//   - what "the next note" means: next in written order or next in time, and whether
+//     the search stops at the end of a block
+
+// ─── Changing a value over time with & ────────────────────────────
+//
+// To change a value partway through a sound (volume, panning, and so on), connect a second
+// note that names only the value that changes:
+//
+//     <value1, value2>&<value2>
+//
+// The second note inherits everything it leaves out from the first. The two are blended
+// across the space between them. If both notes have no length, there is only the blend.
+//
+//     <§1/1,#D5,~4,%100,¶0>&<§2/1,%60>     volume blends from 100 to 60;
+//                                          pitch, source and panning are inherited
+// The waypoint stays attached to this note if it falls in a later measure.
+// For example, in 4/4, §5/1 is the first beat after the note's measure; the
+// waypoint follows each instance of the pattern in the BlockList.
+//
+// This is also how channel volume and pan changes from a tracker module are written.
+// & (a blend between notes) and operators (a value stepping over time inside one note,
+// like <%15+0.1→0/1:4>) are different tools.
+// UNDECIDED: which curve the blend uses (linear, exponential, ...) and the syntax for naming it.
+
+// ─── Operators ────────────────────────────────────────────────────
+//
+// A value can change over time with an operator:
+//
+//     <symbol value op amount → interval : count>
+//
+//     symbol    the property symbol (% # ¶ § ...)
+//     value     the starting value
+//     op        + to increase, - to decrease, -+ to oscillate
+//     amount    how much the value changes per interval
+//               (for -+, how far the value swings from the starting value)
+//     →         "at this rate"
+//     interval  how often the change happens, in beat/subdivision
+//               format (see § above); the beat number may be 0
+//               because an interval is a distance, not a position
+//     : count   how many times the change happens (optional, default 1)
+//
+// Read left to right: value, changed this way, by this amount, at this rate, this many times.
+// (An earlier draft wrote the arrow as ×, e.g. <%15+0.1×0/1:1>. Same slot, same meaning.)
+//
+// Examples:
+//
+//     <%15+0.1→0/1>      start at volume 15, add 0.1 every subdivision, once
+//     <%15+0.1→0/1:4>    same, but repeated 4 times
+//     <#C5-2→0/2:8>      start at C5, drop 2 Hz every 2 subdivisions, 8 times
+//
+// ─── Oscillation: -+ ──────────────────────────────────────────────
+//
+// -+ instead of + or - makes the value alternate: down by amount, then
+// up by amount, then down again, each operation changing direction.
+//
+//     <symbol value -+ amount → interval : count>
+//
+// :count is how many direction changes happen, so :4 gives four
+// half-cycles (down, up, down, up). Two direction changes make one
+// full cycle.
+//
+//     <#C5-+0.25→0/2:4>    pitch swings between C5 and C4.75,
+//                          changing direction every 2 subdivisions,
+//                          four times
+//
+// The waveform is a triangle, since each half-cycle is a linear ramp
+// between two values. IT's vibrato is a sine; the triangle is a close
+// approximation.
+//
+// This is how H, K, tremolo, panbrello, and any other periodic
+// modulation are written.
+//
+// UNDECIDED: what an omitted :count means for -+ (once, or until the
+//   note ends?). Once is the mechanical default, but "until the note
+//   ends" is what vibrato almost always wants.
+
+// A position operator uses a shorter form because the interval is
+// implied by the step itself:
+//
+//     <§1/1+0/0.25:2>
+//
+// means: place a copy at §1/1, and another at §1/1.25. Two copies
+// total. The step (0/0.25) is used directly as the interval between
+// copies.
+//
+// Omitting :count applies the change once.
+//
+// Amounts and intervals are in the same beat/subdivision units as §.
+// UNDECIDED: what :count means for a position operator. <%15+0.1→0/1:4> makes 4 changes, but
+//   <§1/1+0/0.25:2> is written above as 2 copies total (1 change). Is :2 two hits or three?
+
+Config
+{
+    TrackscriptVersion: 1.10; // <- useful for the player only, should be told at conversion from the converter
+    BeatsPerMinute: 110; // <- This is something that's hard to define from measure itself so it's a global value
+    SongVolume: 9.84%; // <- Global volume has utility for a player and for "mastering" your work
+    PanningLaw: equal_power; // <- linear or equal_power
+}
+
+// Blocklist and everything else is defined line by line, when playing the blocklist for anything in curly brackets check line by line and play everything on that line. That lets multiple patterns be played on that line.
+// Each call ends with ";". Several calls on one line play together.
+
+// ─── Files and directories ────────────────────────────────────────
+//
+// A .trackscript file lives in a directory alongside its samples
+// and sidecars. Paths in the file are always relative to that
+// directory.
+//
+//     song.trackscript              the arrangement
+//     samples.json                  sample metadata (optional)
+//     samples/
+//         01_KICK.wav               raw audio
+//         02_STRING.wav
+//         ...
+//     instruments/
+//         GrandPiano.instrument     envelope and voice behavior
+//
+// A .trackscript file with no samples.json and no external sample
+// references is self-contained — but any file referencing a WAV,
+// an .sf2, or an instrument sidecar needs those files present
+// when the player runs.
+
+// ─── samples.json ─────────────────────────────────────────────────
+//
+// Samples need metadata that WAV cannot hold: the tuning anchor
+// (the frequency at which C5 plays without transposition), the
+// loop points, and the default volume. This metadata lives in
+// samples.json, keyed by sample id.
+//
+//     {
+//       "samples": [
+//         {
+//           "id": 2,
+//           "name": "STRING",
+//           "file": "samples/02_STRING.wav",
+//           "c5Speed": 22328,
+//           "length": 79679,
+//           "loops": {
+//             "main": { "start": 8780, "end": 79679, "pingpong": false }
+//           },
+//           "volume": { "default": 256, "global": 64, "panning": 128 }
+//         }
+//       ]
+//     }
+//
+// The WAV's own "smpl" chunk is also written for compatibility with
+// generic audio tools. If the two disagree, samples.json wins.
+// (Sidecar and samples.json values are written by the converter and
+// may use internal scales; the converter handles mapping to the
+// Trackscript scales, e.g. panning 128 here = ¶0 in a note.)
+// UNDECIDED: the volume scales above (default 256, global 64) and how they map to %.
+
+// ─── Instrument sidecars ──────────────────────────────────────────
+//
+// An instrument describes how a sound behaves across its life:
+// envelopes, voice-ending behavior, filter defaults. It lives in
+// its own file and is referenced from a block. Sidecars are
+// generated by the conversion script.
+//
+//     Instrument GrandPiano
+//     {
+//         Samples: ( 'samples/05_HARP.wav' )
+//
+//         NNA: release;
+//         Fadeout: 128;
+//
+//         VolumeEnvelope
+//         {
+//             Points: (0,64), (10,50), (30,32), (60,0);
+//             Sustain: 2;
+//         }
+//     }
+//
+// When a block declares "Instrument GrandPiano", every note in
+// that block uses the envelope and behavior from that file. Without
+// an instrument, notes are raw samples with a hard start and a hard
+// stop — no fading, no release phase.
+// UNDECIDED:
+//   - how a block declares which instrument it uses (the sidecar is shown above, but no
+//     "Instrument GrandPiano" line appears inside a block)
+//   - whether the envelope's Sustain index starts at 0 or 1
+//   - how IT's NNA modes (cut, continue, off, fade) map to values like "release"
+
+// A shim is an effect the format doesn't natively express. It references something external by name, everything internal to the format itself will almost always use symbols if possible.
+// "@<'Filter.Lowpass'(cutoff: 64, resonance: 0.5)>"
+// Shims are attached to a voice with @. They take effect at the position they're written and last until the next shim of the same name or the end of the voice.
+// "@<'Tempo'(120)> ƒChorus(); @<'Tempo'(100, ~16)> ƒBridge();"
+// Tempo (BPM) and measure (time signature) changes are shims set from the BlockList, because they
+// affect everything after that point. Tempo lines also advance one measure at a time; § is local
+// to that line. Config's BeatsPerMinute is only the starting value.
+// In 'Tempo'(100, ~16), ~ is the usual length in beats: the tempo takes 16 beats to reach 100.
+// With no ~, the change is instant.
+// A shim can take a § like a note does: "@<§2/3,'Tempo'(120)>" changes the tempo at the third
+// beat of the second measure. With no §, it takes effect at the start of the measure it is
+// written in.
+// A shim is told apart from a note by the @ in front of it and the quoted name inside.
+// IT has both a tempo and a speed (ticks per row). Trackscript has only tempo, so the converter
+// folds speed into the tempo shim as an effective BPM:
+//     BPM = 24 × tempo ÷ (rowsPerBeat × speed)     (6 × tempo ÷ speed at 4 rows per beat)
+// UNDECIDED:
+//   - how a measure shim relates to a block's own signature (|4/4'name') and BlockList(4/4)
+//   - a property for a sample start offset (none exists yet)
+
+BlockList(4/4)
+{
+    ƒKick;
+    ƒKick; ƒSnare;
+    ƒKick;
+    ƒKick; ƒSnare;
+    ; // an explicit empty measure
+    ƒKick;
+}
+
+// Each named pattern below is one measure. The BlockList places it at the
+// corresponding measure; repeating ƒKick repeats that measure pattern.
+// Calls on the same line play together. Calling an undefined pattern is an error.
+
+// Technically commas aren't needed in notation but you can add them.
+
+// ─── Punctuation ──────────────────────────────────────────────────
+//
+//     ;   ends a Config entry and ends a BlockList call
+//     ,   optional separator between properties and between notes
+//     :   used four ways, told apart by where it appears:
+//             Config entries                 BeatsPerMinute: 110;
+//             pattern source declaration     ƒ'samples/X.wav'():
+//             operator counts                <%15+0.1→0/1:4>
+//             named shim arguments           'Filter.Lowpass'(cutoff: 64)
+//     //  the only comment form
+
+BlockArray()
+{
+    Kick = ƒ'samples/KICK.wav'():
+    {
+        @4/4[<§1/1,#C5,~0.25,%100,¶0>]
+    }
+
+    Snare = ƒ'samples/SNARE.wav'():
+    {
+        @4/4[<§3/1,#C5,~0.25,%100,¶0>]
+    }
+}

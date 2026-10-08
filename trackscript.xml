@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language SYSTEM "language.dtd">
+<language name="Trackscript" section="Sources" version="1" kateversion="5.0" extensions="*.trackscript" mimetype="" license="MIT" author="">
+  <highlighting>
+
+    <list name="keywords">
+      <item>Config</item>
+      <item>BlockList</item>
+      <item>BlockArray</item>
+      <item>Instrument</item>
+      <item>VolumeEnvelope</item>
+    </list>
+    <list name="keys">
+      <item>TrackscriptVersion</item>
+      <item>BeatsPerMinute</item>
+      <item>SongVolume</item>
+      <item>Samples</item>
+      <item>NNA</item>
+      <item>Fadeout</item>
+      <item>Points</item>
+      <item>Sustain</item>
+    </list>
+    <list name="values">
+      <item>release</item>
+      <item>cut</item>
+      <item>continue</item>
+      <item>off</item>
+      <item>fade</item>
+    </list>
+    <list name="alerts">
+      <item>UNDECIDED</item>
+      <item>TODO</item>
+      <item>FIXME</item>
+    </list>
+
+    <contexts>
+
+      <!-- Top level: BlockList, BlockArray, Config, instruments -->
+      <context name="Normal" attribute="Normal Text" lineEndContext="#stay">
+        <DetectChar char="{" attribute="Normal Text" context="#stay" beginRegion="Brace"/>
+        <DetectChar char="}" attribute="Normal Text" context="#stay" endRegion="Brace"/>
+        <DetectChar char="[" attribute="Normal Text" context="#stay" beginRegion="Block"/>
+        <DetectChar char="]" attribute="Normal Text" context="#stay" endRegion="Block"/>
+        <DetectChar char="&lt;" attribute="Normal Text" context="Note"/>
+        <IncludeRules context="Common"/>
+        <IncludeRules context="Numbers"/>
+      </context>
+
+      <!-- Inside a note or shim: <...> -->
+      <context name="Note" attribute="Normal Text" lineEndContext="#stay">
+        <DetectChar char="&gt;" attribute="Normal Text" context="#pop"/>
+        <DetectChar char="(" attribute="Normal Text" context="Args"/>
+        <!-- operator tail, e.g. +0.1→0/1:4 or +0/0.25:2 -->
+        <RegExpr String="[+\-][\d.]+(?:/[\d.]+)?(?:[×→][\d.]+(?:/[\d.]+)?)?(?::\d+)?" attribute="Operator" context="#stay"/>
+        <IncludeRules context="Common"/>
+        <!-- a number with no symbol: the fallback form -->
+        <RegExpr String="\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?" attribute="Bare Value" context="#stay"/>
+      </context>
+
+      <!-- Inside parentheses within a note or shim: 'Tempo'(100, ~16) -->
+      <context name="Args" attribute="Normal Text" lineEndContext="#stay">
+        <DetectChar char=")" attribute="Normal Text" context="#pop"/>
+        <IncludeRules context="Common"/>
+        <IncludeRules context="Numbers"/>
+      </context>
+
+      <!-- Rules shared by every context above -->
+      <context name="Common" attribute="Normal Text" lineEndContext="#stay">
+        <Detect2Chars char="/" char1="/" attribute="Comment" context="Comment"/>
+        <RegExpr String="\|\d+/\d+'[^']*'" attribute="Block Def" context="#stay"/>
+        <RegExpr String="ƒ[A-Za-z_]\w*(?=\()" attribute="Block Call" context="#stay"/>
+        <RegExpr String="ƒ'[^']*'(?:\(\d*\))?" attribute="Source Path" context="#stay"/>
+        <RegExpr String="ƒ\d+" attribute="Source ID" context="#stay"/>
+        <DetectChar char="ƒ" attribute="Source ID" context="#stay"/>
+        <DetectChar char="'" attribute="String" context="String"/>
+        <RegExpr String="§[\d.]+(?:/[\d.]+)?" attribute="Position" context="#stay"/>
+        <RegExpr String="#(?:[A-Ga-g][#b]?-?\d+|\d+(?:\.\d+)?)" attribute="Pitch" context="#stay"/>
+        <RegExpr String="~[\d.]+" attribute="Length" context="#stay"/>
+        <RegExpr String="%-?[\d.]+" attribute="Volume" context="#stay"/>
+        <RegExpr String="¶-?[\d.]+" attribute="Pan" context="#stay"/>
+        <!-- connector or shim marker glued to the note or call on its left -->
+        <RegExpr String="(?&lt;=[&gt;)\]])[&amp;=▲♪@]+" attribute="Connector" context="#stay"/>
+        <!-- standalone: space before it, or start of line -->
+        <RegExpr String="[&amp;=▲♪@]+" attribute="Shim" context="#stay"/>
+        <AnyChar String="→×" attribute="Operator" context="#stay"/>
+        <RegExpr String="(?&lt;=Instrument )\w+" attribute="Block Def" context="#stay"/>
+        <keyword String="keywords" attribute="Keyword" context="#stay"/>
+        <keyword String="keys" attribute="Key" context="#stay"/>
+        <keyword String="values" attribute="Value" context="#stay"/>
+      </context>
+
+      <!-- Plain numbers outside notes: BlockList(4/4), Config values -->
+      <context name="Numbers" attribute="Normal Text" lineEndContext="#stay">
+        <RegExpr String="\d+(?:\.\d+)?%" attribute="Float" context="#stay"/>
+        <RegExpr String="\d+(?:\.\d+)?/\d+(?:\.\d+)?" attribute="Number" context="#stay"/>
+        <RegExpr String="\d+\.\d+" attribute="Float" context="#stay"/>
+        <RegExpr String="\d+" attribute="Number" context="#stay"/>
+      </context>
+
+      <context name="String" attribute="String" lineEndContext="#pop">
+        <DetectChar char="'" attribute="String" context="#pop"/>
+      </context>
+
+      <context name="Comment" attribute="Comment" lineEndContext="#pop">
+        <keyword String="alerts" attribute="Alert" context="#stay"/>
+      </context>
+
+    </contexts>
+
+    <itemDatas>
+      <itemData name="Normal Text" defStyleNum="dsNormal" spellChecking="false"/>
+      <itemData name="Comment" defStyleNum="dsComment"/>
+      <itemData name="Alert" defStyleNum="dsAlert" spellChecking="false"/>
+      <itemData name="Keyword" defStyleNum="dsKeyword" spellChecking="false"/>
+      <itemData name="Key" defStyleNum="dsAttribute" spellChecking="false"/>
+      <itemData name="Value" defStyleNum="dsOthers" spellChecking="false"/>
+      <itemData name="String" defStyleNum="dsString" spellChecking="false"/>
+      <itemData name="Source Path" defStyleNum="dsSpecialString" spellChecking="false"/>
+      <itemData name="Source ID" defStyleNum="dsVariable" spellChecking="false"/>
+      <itemData name="Block Call" defStyleNum="dsFunction" spellChecking="false"/>
+      <itemData name="Block Def" defStyleNum="dsDataType" spellChecking="false"/>
+      <itemData name="Position" defStyleNum="dsDecVal" spellChecking="false"/>
+      <itemData name="Pitch" defStyleNum="dsConstant" spellChecking="false"/>
+      <itemData name="Length" defStyleNum="dsFloat" spellChecking="false"/>
+      <itemData name="Volume" defStyleNum="dsBaseN" spellChecking="false"/>
+      <itemData name="Pan" defStyleNum="dsChar" spellChecking="false"/>
+      <itemData name="Number" defStyleNum="dsDecVal" spellChecking="false"/>
+      <itemData name="Float" defStyleNum="dsFloat" spellChecking="false"/>
+      <itemData name="Operator" defStyleNum="dsOperator" spellChecking="false"/>
+      <itemData name="Connector" defStyleNum="dsControlFlow" spellChecking="false"/>
+      <itemData name="Shim" defStyleNum="dsPreprocessor" spellChecking="false"/>
+      <itemData name="Bare Value" defStyleNum="dsWarning" spellChecking="false"/>
+    </itemDatas>
+
+  </highlighting>
+  <general>
+    <comments>
+      <comment name="singleLine" start="//"/>
+    </comments>
+    <keywords casesensitive="1"/>
+  </general>
+</language>
